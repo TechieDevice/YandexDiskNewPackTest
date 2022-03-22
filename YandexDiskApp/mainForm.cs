@@ -56,7 +56,7 @@ namespace YandexDiskApp
                     foreach (var item in items)
                     {
                         resultBox.Text += item.Path + Environment.NewLine;
-                        if (item.PublicUrl != String.Empty)
+                        if (item.PublicUrl != null)
                             resultBox.Text += item.PublicUrl + Environment.NewLine;
                         resultBox.Text += item.Modified + Environment.NewLine;
                         resultBox.Text += Environment.NewLine;
@@ -89,12 +89,21 @@ namespace YandexDiskApp
         private async void downloadButton_Click(object sender, EventArgs e)
         {
             try
-            {
+            {      
                 var path = Path.Combine(downloads, pathInDisk.Text.Split('/').Last().Split(@"\").Last());
-                await _diskApi.Files.DownloadFileAsync(path: pathInDisk.Text,
-                                                       localFile: path,
-                                                       cancellationToken: CancellationToken.None);
-                resultBox.Text = "file downloaded";
+
+                using (FileStream fileStream = File.Create(path))
+                {
+                    using (Stream diskStream = await _diskApi.Files.DownloadFileAsync(pathInDisk.Text,
+                                                                                        CancellationToken.None))
+                    {
+                        await diskStream.CopyToAsync(fileStream, bufferSize: 81920, CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                this.BeginInvoke((MethodInvoker)delegate ()
+                {
+                    resultBox.Text = "file downloaded";
+                });
             }
             catch (Exception ex)
             {
@@ -107,11 +116,18 @@ namespace YandexDiskApp
             try
             {
                 var path = Path.Combine(pathInDisk.Text, pathToFile.Text.Split('/').Last().Split(@"\").Last());
-                await _diskApi.Files.UploadFileAsync(path: path,
-                                                     overwrite: false,
-                                                     localFile: pathToFile.Text, 
-                                                     cancellationToken: CancellationToken.None);
-                resultBox.Text = "file uploaded";
+
+                using (FileStream fileStream = File.OpenRead(pathToFile.Text))
+                {
+                    await _diskApi.Files.UploadFileAsync(path: path,
+                                                         overwrite: false,
+                                                         file: fileStream,
+                                                         cancellationToken: CancellationToken.None);
+                }
+                this.BeginInvoke((MethodInvoker)delegate ()
+                {
+                    resultBox.Text = "file uploaded";
+                });
             }
             catch (Exception ex)
             {
