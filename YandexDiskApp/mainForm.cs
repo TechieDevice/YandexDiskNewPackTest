@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using YandexDisk.Client;
@@ -16,20 +17,23 @@ namespace YandexDiskApp
     {
         private IDiskApi _diskApi;
 
-        private string downloads;
-
         public mainForm(IDiskApi api)
         {
-            downloads = Path.Combine(Directory.GetCurrentDirectory(), "downloads");
+            _diskApi = api;
+
+            InitializeComponent();
+        }
+
+        private string GetDownloadsPath()
+        {
+            var downloads = Path.Combine(Directory.GetCurrentDirectory(), "downloads");
             if (!Directory.Exists(downloads))
             {
                 var dir = new FileInfo(downloads);
                 dir.Directory.CreateSubdirectory("downloads");
             }
 
-            _diskApi = api;
-
-            InitializeComponent();
+            return downloads;
         }
 
         private void loadButton_Click(object sender, EventArgs e)
@@ -44,10 +48,7 @@ namespace YandexDiskApp
         {
             try
             {
-                var result = await _diskApi.MetaInfo.GetInfoAsync(new ResourceRequest
-                                                    {
-                                                        Path = pathInDisk.Text
-                                                    }, CancellationToken.None);
+                var result = await GetListAsync(pathInDisk.Text, CancellationToken.None);
             
                 resultBox.Text = String.Empty;
                 if (result.Embedded.Items.Any() == true)
@@ -77,8 +78,8 @@ namespace YandexDiskApp
         {
             try
             {
-                await _diskApi.MetaInfo.PublishFolderAsync(pathInDisk.Text, CancellationToken.None);
-                resultBox.Text = "file published";
+                var link = await PublishAsync(pathInDisk.Text, CancellationToken.None);
+                resultBox.Text = "file published, link:" + link.Href;
             }
             catch (Exception ex)
             {
@@ -89,17 +90,15 @@ namespace YandexDiskApp
         private async void downloadButton_Click(object sender, EventArgs e)
         {
             try
-            {      
+            {
+                var downloads = GetDownloadsPath();
                 var path = Path.Combine(downloads, pathInDisk.Text.Split('/').Last().Split(@"\").Last());
 
                 using (FileStream fileStream = File.Create(path))
                 {
-                    using (Stream diskStream = await _diskApi.Files.DownloadFileAsync(pathInDisk.Text,
-                                                                                        CancellationToken.None))
-                    {
-                        await diskStream.CopyToAsync(fileStream, bufferSize: 81920, CancellationToken.None).ConfigureAwait(false);
-                    }
+                    await DownloadAsync(fileStream, pathInDisk.Text, CancellationToken.None, false);
                 }
+
                 this.BeginInvoke((MethodInvoker)delegate ()
                 {
                     resultBox.Text = "file downloaded";
@@ -116,14 +115,11 @@ namespace YandexDiskApp
             try
             {
                 var path = Path.Combine(pathInDisk.Text, pathToFile.Text.Split('/').Last().Split(@"\").Last());
-
                 using (FileStream fileStream = File.OpenRead(pathToFile.Text))
                 {
-                    await _diskApi.Files.UploadFileAsync(path: path,
-                                                         overwrite: false,
-                                                         file: fileStream,
-                                                         cancellationToken: CancellationToken.None);
+                    await UploadAsync(path, fileStream, false, CancellationToken.None);
                 }
+
                 this.BeginInvoke((MethodInvoker)delegate ()
                 {
                     resultBox.Text = "file uploaded";
@@ -133,6 +129,33 @@ namespace YandexDiskApp
             {
                 resultBox.Text = ex.Message;
             }
-        }   
+        }
+
+        private async Task<Resource> GetListAsync(string path, CancellationToken token)
+        {
+            return await _diskApi.MetaInfo.GetInfoAsync(new ResourceRequest { Path = path }, token);
+        }
+
+        private async Task<Link> PublishAsync(string path, CancellationToken token)
+        {
+            return await _diskApi.MetaInfo.PublishFolderAsync(path, token);
+        }
+
+        private async Task DownloadAsync(Stream stream, string path, CancellationToken token, bool isAwait)
+        {
+            using (Stream diskStream = await _diskApi.Files.DownloadFileAsync(path, token))
+            {
+                await diskStream.CopyToAsync(stream, bufferSize: 81920, token).ConfigureAwait(isAwait);
+            }
+        }
+
+        private async Task UploadAsync(string path, Stream stream, bool isOverwrite, CancellationToken token)
+        {
+            await _diskApi.Files.UploadFileAsync(path: path,
+                                                 overwrite: isOverwrite,
+                                                 file: stream,
+                                                 cancellationToken: CancellationToken.None);
+
+        }
     }
 }
